@@ -1,0 +1,176 @@
+import { Divider } from "@/components/Divider"
+import { CardStatusBadge } from "@/components/ui/cards/CardStatusBadge"
+import { cardById } from "@/data/cards"
+import { merchantById } from "@/data/merchants"
+import { CardCategory } from "@/data/types"
+import { maskCardNumber } from "@/lib/cards"
+import { formatInZone } from "@/lib/dates"
+import { formatMoney } from "@/lib/money"
+import { cx } from "@/lib/utils"
+import Link from "next/link"
+import { notFound } from "next/navigation"
+import { CardActions } from "../card-actions"
+
+const CATEGORY_LABELS: Record<CardCategory, string> = {
+  any: "Any category",
+  advertising: "Advertising",
+  software: "Software",
+  travel: "Travel",
+  supplies: "Supplies",
+  contractors: "Contractors",
+}
+
+/** Amber past 80% of the limit, so ops sees a card running out before it does. */
+const AMBER_AT = 0.8
+
+export default async function CardDetail({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const card = cardById(id)
+  if (!card) notFound()
+
+  const merchant = merchantById(card.merchantId)!
+
+  // Both sides are minor units; the ratio is the only float here and it is
+  // display-only.
+  const ratio = card.spendLimit > 0 ? card.spent / card.spendLimit : 0
+  const pct = Math.min(100, Math.round(ratio * 100))
+  const overAmber = ratio >= AMBER_AT
+  const remaining = Math.max(0, card.spendLimit - card.spent)
+
+  return (
+    <div className="p-4 sm:p-6">
+      <Link
+        href="/cards"
+        className="text-sm text-gray-500 hover:text-gray-900 dark:hover:text-gray-50"
+      >
+        ← All cards
+      </Link>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
+            {card.nickname}
+          </h1>
+          <CardStatusBadge status={card.status} />
+        </div>
+        <CardActions cardId={card.id} status={card.status} />
+      </div>
+      <p className="mt-1 font-mono text-sm text-gray-500">
+        {maskCardNumber(card.last4)} · {card.id}
+      </p>
+
+      {card.status === "cancelled" && (
+        <p className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500 dark:border-gray-800 dark:bg-gray-900">
+          This card is cancelled. Cancelled is terminal — it cannot be
+          reactivated, and a replacement has to be issued fresh.
+        </p>
+      )}
+
+      <Divider />
+
+      <section aria-labelledby="spend-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2
+            id="spend-heading"
+            className="text-sm font-semibold text-gray-900 dark:text-gray-50"
+          >
+            Spend against limit
+          </h2>
+          <p className="text-sm tabular-nums text-gray-500">
+            {formatMoney(card.spent, card.currency)} of{" "}
+            {formatMoney(card.spendLimit, card.currency)}
+          </p>
+        </div>
+
+        <div
+          className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+          aria-labelledby="spend-heading"
+          aria-valuetext={`${pct}% of limit spent`}
+        >
+          <div
+            className={cx(
+              "h-full rounded-full transition-all",
+              overAmber
+                ? "bg-amber-500 dark:bg-amber-500"
+                : "bg-blue-500 dark:bg-blue-500",
+            )}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+
+        <p
+          className={cx(
+            "mt-1.5 text-sm tabular-nums",
+            overAmber
+              ? "text-amber-700 dark:text-amber-500"
+              : "text-gray-500",
+          )}
+        >
+          {pct}% used · {formatMoney(remaining, card.currency)} remaining
+          {overAmber && " · past 80% of the limit"}
+        </p>
+      </section>
+
+      <Divider />
+
+      <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Field label="Merchant">
+          {merchant.name}
+          <span className="ml-2 text-gray-500">{merchant.country}</span>
+        </Field>
+        <Field label="Number">
+          <span className="font-mono">{maskCardNumber(card.last4)}</span>
+        </Field>
+        <Field label="Category lock">{CATEGORY_LABELS[card.category]}</Field>
+        <Field label="Spend limit">
+          {formatMoney(card.spendLimit, card.currency)}
+          <span className="ml-2 text-gray-500">{card.currency}</span>
+        </Field>
+        <Field label="Reference">
+          <span className="font-mono">{card.reference}</span>
+        </Field>
+        <Field label="Status">
+          <CardStatusBadge status={card.status} />
+        </Field>
+        <Field label="Created (UTC)">
+          <span className="font-mono text-sm">{card.createdAt}</span>
+        </Field>
+        <Field label={`Created (${merchant.timezone})`}>
+          {formatInZone(card.createdAt, merchant.timezone)}
+        </Field>
+      </dl>
+
+      <Divider />
+
+      <p className="text-sm text-gray-500">
+        The full number was shown once when this card was issued and is not
+        stored. Only the last four and the reference above are kept.
+      </p>
+    </div>
+  )
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <dt className="text-sm text-gray-500">{label}</dt>
+      <dd className="mt-1 text-sm text-gray-900 dark:text-gray-50">
+        {children}
+      </dd>
+    </div>
+  )
+}
