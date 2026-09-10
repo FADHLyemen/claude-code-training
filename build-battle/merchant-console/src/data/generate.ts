@@ -92,8 +92,7 @@ export function generate() {
       createdAt.setUTCHours(between(0, 23), between(0, 59), between(0, 59), 0)
 
       const status = statusFor()
-      const method =
-        rand() < 0.82 ? "card" : rand() < 0.6 ? "wallet" : "bank_transfer"
+      const method = rand() < 0.82 ? "card" : rand() < 0.6 ? "wallet" : "bank_transfer"
       const amount = between(450, 480_00)
 
       const payment: Payment = {
@@ -104,9 +103,7 @@ export function generate() {
         status,
         method,
         cardBrand:
-          method === "card"
-            ? pick(["visa", "mastercard", "amex"] as const)
-            : null,
+          method === "card" ? pick(["visa", "mastercard", "amex"] as const) : null,
         last4: method === "card" ? String(between(1000, 9999)) : null,
         createdAt: createdAt.toISOString(),
         description: pick(DESCRIPTIONS),
@@ -132,9 +129,7 @@ export function generate() {
       }
 
       if (status === "disputed") {
-        const openedAt = new Date(
-          createdAt.getTime() + between(2, 10) * 86_400_000,
-        )
+        const openedAt = new Date(createdAt.getTime() + between(2, 10) * 86_400_000)
         disputes.push({
           id: `dp_${pad(++disputeSeq)}`,
           paymentId: payment.id,
@@ -164,98 +159,93 @@ export function generate() {
 }
 
 /**
- * Seed cards so the list, detail page, and spend bar have something to show on
- * a fresh boot. Same deterministic PRNG as everything else.
+ * A handful of cards so the list, the detail page, and the spend bar have
+ * something to show on a fresh boot. Same deterministic PRNG as everything
+ * else, so every machine sees the same records.
  *
- * Spend is never assigned. Each card gets real authorizations and its spend is
- * their sum, exactly as for a card issued through the console — so no seeded
- * number can disagree with the transactions shown. The generated number is
- * discarded here just as the issue route discards it.
+ * Spend is not assigned. Each card gets real authorizations and its spend is
+ * the sum of them, exactly as it is for a card issued through the console —
+ * there is no seeded number that could disagree with the transactions shown.
+ *
+ * Only the last four is kept; the generated number is discarded here exactly
+ * as the issue route discards it.
  */
-function generateCards(): {
-  cards: Card[]
-  cardTransactions: CardTransaction[]
-} {
-  const seeds: [
-    string,
-    number,
-    number,
-    CardCategory,
-    CardStatus,
-    number,
-    number,
-  ][] = [
-    ["Google Ads", 0, 500_000, "advertising", "active", 6, 38],
-    ["AWS monthly", 1, 250_000, "software", "active", 9, 26],
-    ["Contractor — design", 3, 180_000, "contractors", "frozen", 4, 19],
-    ["Trade show travel", 4, 320_000, "travel", "active", 2, 11],
-    ["Old agency retainer", 6, 120_000, "advertising", "cancelled", 5, 63],
+function generateCards(): { cards: Card[]; cardTransactions: CardTransaction[] } {
+  const seeds: {
+    nickname: string
+    merchantIndex: number
+    spendLimit: number
+    category: CardCategory
+    status: CardStatus
+    /** How many authorizations to record against it. */
+    charges: number
+    daysAgo: number
+  }[] = [
+    { nickname: "Google Ads", merchantIndex: 0, spendLimit: 500_000, category: "advertising", status: "active", charges: 6, daysAgo: 38 },
+    { nickname: "AWS monthly", merchantIndex: 1, spendLimit: 250_000, category: "software", status: "active", charges: 9, daysAgo: 26 },
+    { nickname: "Contractor — design", merchantIndex: 3, spendLimit: 180_000, category: "contractors", status: "frozen", charges: 4, daysAgo: 19 },
+    { nickname: "Trade show travel", merchantIndex: 4, spendLimit: 320_000, category: "travel", status: "active", charges: 2, daysAgo: 11 },
+    { nickname: "Old agency retainer", merchantIndex: 6, spendLimit: 120_000, category: "advertising", status: "cancelled", charges: 5, daysAgo: 63 },
   ]
-  const vendors = [
-    "Monthly invoice",
-    "Usage charge",
-    "Subscription",
-    "Top-up",
-    "Service fee",
-  ]
+
+  const vendors = ["Monthly invoice", "Usage charge", "Subscription", "Top-up", "Service fee"]
   const cards: Card[] = []
   const cardTransactions: CardTransaction[] = []
   let txSeq = 0
 
-  seeds.forEach(
-    ([nickname, mIndex, spendLimit, category, status, charges, daysAgo], i) => {
-      const merchant = merchants[mIndex]
-      const createdAt = new Date(GENERATED_AT)
-      createdAt.setUTCDate(createdAt.getUTCDate() - daysAgo)
-      createdAt.setUTCHours(between(9, 17), between(0, 59), 0, 0)
-      const issuedAt = createdAt.toISOString()
-      const id = `card_${pad(i + 1, 4)}`
+  seeds.forEach((seed, index) => {
+    const merchant = merchants[seed.merchantIndex]
+    const createdAt = new Date(GENERATED_AT)
+    createdAt.setUTCDate(createdAt.getUTCDate() - seed.daysAgo)
+    createdAt.setUTCHours(between(9, 17), between(0, 59), 0, 0)
+    const issuedAt = createdAt.toISOString()
 
-      for (let c = 0; c < charges; c++) {
-        const at = new Date(createdAt)
-        at.setUTCDate(at.getUTCDate() + between(1, Math.max(2, daysAgo - 1)))
-        if (at > GENERATED_AT) at.setTime(GENERATED_AT.getTime())
-        cardTransactions.push({
-          id: `ctx_${pad(++txSeq, 4)}`,
-          cardId: id,
-          amount: between(
-            Math.round(spendLimit * 0.03),
-            Math.round(spendLimit / Math.max(2, charges - 1)),
-          ),
-          description: vendors[between(0, vendors.length - 1)],
-          createdAt: at.toISOString(),
-        })
-      }
+    const id = `card_${pad(index + 1, 4)}`
+    const number = generateCardNumber(rand)
 
-      const history: CardEvent[] = [
-        { type: "issued", to: "active", at: issuedAt },
-      ]
-      if (status !== "active") {
-        const at = new Date(GENERATED_AT)
-        at.setUTCDate(at.getUTCDate() - between(1, 5))
-        history.push({
-          type: "status_changed",
-          from: "active",
-          to: status,
-          at: at.toISOString(),
-        })
-      }
-
-      cards.push({
-        id,
-        nickname,
-        merchantId: merchant.id,
-        spendLimit,
-        currency: merchant.currency,
-        status,
-        category,
-        last4: generateCardNumber(rand).slice(-4),
-        reference: `cref_${pad(i + 1, 4)}`,
-        createdAt: issuedAt,
-        history,
+    // Authorizations land between issue and today, each a whole minor-unit
+    // amount sized against the limit.
+    const history: CardEvent[] = [{ type: "issued", to: "active", at: issuedAt }]
+    for (let c = 0; c < seed.charges; c++) {
+      const at = new Date(createdAt)
+      at.setUTCDate(at.getUTCDate() + between(1, Math.max(2, seed.daysAgo - 1)))
+      if (at > GENERATED_AT) at.setTime(GENERATED_AT.getTime())
+      cardTransactions.push({
+        id: `ctx_${pad(++txSeq, 4)}`,
+        cardId: id,
+        amount: between(
+          Math.round(seed.spendLimit * 0.03),
+          Math.round(seed.spendLimit / Math.max(2, seed.charges - 1)),
+        ),
+        description: vendors[between(0, vendors.length - 1)],
+        createdAt: at.toISOString(),
       })
-    },
-  )
+    }
+    if (seed.status !== "active") {
+      const at = new Date(GENERATED_AT)
+      at.setUTCDate(at.getUTCDate() - between(1, 5))
+      history.push({
+        type: "status_changed",
+        from: "active",
+        to: seed.status,
+        at: at.toISOString(),
+      })
+    }
+
+    cards.push({
+      id,
+      nickname: seed.nickname,
+      merchantId: merchant.id,
+      spendLimit: seed.spendLimit,
+      currency: merchant.currency,
+      status: seed.status,
+      category: seed.category,
+      last4: number.slice(-4),
+      reference: `cref_${pad(index + 1, 4)}`,
+      createdAt: issuedAt,
+      history,
+    })
+  })
 
   return { cards, cardTransactions }
 }
