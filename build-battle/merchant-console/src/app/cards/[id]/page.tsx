@@ -123,9 +123,7 @@ export default async function CardDetail({
         <p
           className={cx(
             "mt-1.5 text-sm tabular-nums",
-            overAmber
-              ? "text-amber-700 dark:text-amber-500"
-              : "text-gray-500",
+            overAmber ? "text-amber-700 dark:text-amber-500" : "text-gray-500",
           )}
         >
           {pct}% used · {formatMoney(remaining, card.currency)} remaining
@@ -136,30 +134,36 @@ export default async function CardDetail({
       <Divider />
 
       <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Field label="Merchant">
-          {merchant.name}
-          <span className="ml-2 text-gray-500">{merchant.country}</span>
-        </Field>
-        <Field label="Number">
-          <span className="font-mono">{maskCardNumber(card.last4)}</span>
-        </Field>
-        <Field label="Category lock">{CATEGORY_LABELS[card.category]}</Field>
-        <Field label="Spend limit">
-          {formatMoney(card.spendLimit, card.currency)}
-          <span className="ml-2 text-gray-500">{card.currency}</span>
-        </Field>
-        <Field label="Reference">
-          <span className="font-mono">{card.reference}</span>
-        </Field>
-        <Field label="Status">
-          <CardStatusBadge status={card.status} />
-        </Field>
-        <Field label="Created (UTC)">
-          <span className="font-mono text-sm">{card.createdAt}</span>
-        </Field>
-        <Field label={`Created (${merchant.timezone})`}>
-          {formatInZone(card.createdAt, merchant.timezone)}
-        </Field>
+        {(
+          [
+            ["Merchant", `${merchant.name} · ${merchant.country}`],
+            ["Number", maskCardNumber(card.last4)],
+            ["Category lock", CATEGORY_LABELS[card.category]],
+            [
+              "Spend limit",
+              `${formatMoney(card.spendLimit, card.currency)} ${card.currency}`,
+            ],
+            ["Reference", card.reference],
+            ["Created (UTC)", card.createdAt],
+            [
+              `Created (${merchant.timezone})`,
+              formatInZone(card.createdAt, merchant.timezone),
+            ],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-sm text-gray-500">{label}</dt>
+            <dd className="mt-1 text-sm text-gray-900 dark:text-gray-50">
+              {value}
+            </dd>
+          </div>
+        ))}
+        <div>
+          <dt className="text-sm text-gray-500">Status</dt>
+          <dd className="mt-1">
+            <CardStatusBadge status={card.status} />
+          </dd>
+        </div>
       </dl>
 
       <Divider />
@@ -234,23 +238,6 @@ export default async function CardDetail({
         The full number was shown once when this card was issued and is not
         stored. Only the last four and the reference above are kept.
       </p>
-    </div>
-  )
-}
-
-function Field({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <dt className="text-sm text-gray-500">{label}</dt>
-      <dd className="mt-1 text-sm text-gray-900 dark:text-gray-50">
-        {children}
-      </dd>
     </div>
   )
 }

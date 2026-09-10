@@ -37,30 +37,56 @@ const CATEGORY_LABELS: Record<CardCategory, string> = {
 }
 
 type Issued = { card: Card; fullNumber: string }
+type Merchant = { id: string; name: string; currency: Currency }
 
-export function IssueCardDialog({
-  merchants,
+/** Label + control + hint, so each field costs three lines instead of ten. */
+function Field({
+  id,
+  label,
+  hint,
+  className,
+  children,
 }: {
-  merchants: { id: string; name: string; currency: Currency }[]
+  id: string
+  label: string
+  hint?: string
+  className?: string
+  children: React.ReactNode
 }) {
+  return (
+    <div className={className}>
+      <label
+        htmlFor={id}
+        className="text-sm font-medium text-gray-900 dark:text-gray-50"
+      >
+        {label}
+      </label>
+      {children}
+      {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+    </div>
+  )
+}
+
+export function IssueCardDialog({ merchants }: { merchants: Merchant[] }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
-
   const [nickname, setNickname] = useState("")
   const [merchantId, setMerchantId] = useState("")
   const [limit, setLimit] = useState("")
   const [currency, setCurrency] = useState<Currency>("USD")
   const [category, setCategory] = useState<CardCategory>("any")
-
-  // One key per form session. A retried submit reuses it, so a double-click
-  // or a flaky connection cannot issue two cards.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  // One key per form session, so a double-click or a retry cannot issue two
+  // cards. Reset only when the drawer closes.
+  const [key, setKey] = useState(() => crypto.randomUUID())
   const [errors, setErrors] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [issued, setIssued] = useState<Issued | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const reset = () => {
+  const onOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) return
+    // Closing discards the number for good — it was never stored.
     setNickname("")
     setMerchantId("")
     setLimit("")
@@ -69,17 +95,8 @@ export function IssueCardDialog({
     setErrors([])
     setIssued(null)
     setCopied(false)
-    setIdempotencyKey(crypto.randomUUID())
-  }
-
-  const onOpenChange = (next: boolean) => {
-    setOpen(next)
-    // Closing the success screen discards the number for good — it is not
-    // stored, so there is nothing to come back to.
-    if (!next) {
-      reset()
-      router.refresh()
-    }
+    setKey(crypto.randomUUID())
+    router.refresh()
   }
 
   const submit = async (event: React.FormEvent) => {
@@ -97,10 +114,7 @@ export function IssueCardDialog({
     try {
       const response = await fetch("/api/cards", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": idempotencyKey,
-        },
+        headers: { "content-type": "application/json", "idempotency-key": key },
         body: JSON.stringify({
           nickname,
           merchantId,
@@ -110,14 +124,15 @@ export function IssueCardDialog({
         }),
       })
       const data = await response.json()
-
       if (!response.ok) {
         setErrors(data.errors ?? [data.message ?? "Could not issue the card."])
         return
       }
       setIssued(data as Issued)
     } catch {
-      setErrors(["Could not reach the server. Check your connection and retry."])
+      setErrors([
+        "Could not reach the server. Check your connection and retry.",
+      ])
     } finally {
       setSubmitting(false)
     }
@@ -163,9 +178,9 @@ export function IssueCardDialog({
                 </p>
                 <Button
                   variant="secondary"
+                  type="button"
                   className="mt-3 gap-2 py-1"
                   onClick={copy}
-                  type="button"
                 >
                   {copied ? (
                     <Check className="size-4 shrink-0" aria-hidden="true" />
@@ -177,23 +192,27 @@ export function IssueCardDialog({
               </div>
 
               <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <Row label="Nickname">{issued.card.nickname}</Row>
-                <Row label="Stored as">
-                  <span className="font-mono">
-                    {maskCardNumber(issued.card.last4)}
-                  </span>
-                </Row>
-                <Row label="Spend limit">
-                  {formatMoney(issued.card.spendLimit, issued.card.currency)}
-                </Row>
-                <Row label="Reference">
-                  <span className="font-mono">{issued.card.reference}</span>
-                </Row>
+                {[
+                  ["Nickname", issued.card.nickname],
+                  ["Stored as", maskCardNumber(issued.card.last4)],
+                  [
+                    "Spend limit",
+                    formatMoney(issued.card.spendLimit, issued.card.currency),
+                  ],
+                  ["Reference", issued.card.reference],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-gray-500">{label}</dt>
+                    <dd className="mt-0.5 text-gray-900 dark:text-gray-50">
+                      {value}
+                    </dd>
+                  </div>
+                ))}
               </dl>
             </DrawerBody>
 
             <DrawerFooter>
-              <Button onClick={() => onOpenChange(false)} className="py-1.5">
+              <Button className="py-1.5" onClick={() => onOpenChange(false)}>
                 Done
               </Button>
             </DrawerFooter>
@@ -226,107 +245,94 @@ export function IssueCardDialog({
                 </div>
               )}
 
-              <div>
-                <label
-                  htmlFor="card-nickname"
-                  className="text-sm font-medium text-gray-900 dark:text-gray-50"
-                >
-                  Nickname
-                </label>
+              <Field
+                id="card-nickname"
+                label="Nickname"
+                hint="What ops will recognize it by in the list."
+              >
                 <Input
                   id="card-nickname"
-                  name="nickname"
                   value={nickname}
-                  onChange={(event) => setNickname(event.target.value)}
+                  onChange={(e) => setNickname(e.target.value)}
                   placeholder="Google Ads"
                   className="mt-1.5"
                   autoComplete="off"
                 />
-                <p className="mt-1 text-xs text-gray-500">
-                  What ops will recognize it by in the list.
-                </p>
-              </div>
+              </Field>
 
-              <div>
-                <label
-                  htmlFor="card-merchant"
-                  className="text-sm font-medium text-gray-900 dark:text-gray-50"
-                >
-                  Merchant
-                </label>
+              <Field id="card-merchant" label="Merchant">
                 <Select
                   value={merchantId}
                   onValueChange={(value) => {
                     setMerchantId(value)
-                    // Default the currency to the merchant's own; still editable.
-                    const merchant = merchants.find((m) => m.id === value)
-                    if (merchant) setCurrency(merchant.currency)
+                    // A card settles in its merchant's currency; the server
+                    // rejects a mismatch, so follow the merchant here.
+                    const m = merchants.find((x) => x.id === value)
+                    if (m) setCurrency(m.currency)
                   }}
                 >
-                  <SelectTrigger id="card-merchant" className="mt-1.5 w-full py-1.5">
+                  <SelectTrigger
+                    id="card-merchant"
+                    className="mt-1.5 w-full py-1.5"
+                  >
                     <SelectValue placeholder="Choose a merchant" />
                   </SelectTrigger>
                   <SelectContent>
-                    {merchants.map((merchant) => (
-                      <SelectItem key={merchant.id} value={merchant.id}>
-                        {merchant.name}
+                    {merchants.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </Field>
 
               <div className="flex gap-3">
-                <div className="flex-1">
-                  <label
-                    htmlFor="card-limit"
-                    className="text-sm font-medium text-gray-900 dark:text-gray-50"
-                  >
-                    Spend limit
-                  </label>
+                <Field
+                  id="card-limit"
+                  label="Spend limit"
+                  hint={`Up to ${formatMoney(MAX_SPEND_LIMIT, currency)}.`}
+                  className="flex-1"
+                >
                   <Input
                     id="card-limit"
-                    name="spendLimit"
                     inputMode="decimal"
                     value={limit}
-                    onChange={(event) => setLimit(event.target.value)}
+                    onChange={(e) => setLimit(e.target.value)}
                     placeholder="2500.00"
                     className="mt-1.5"
                     autoComplete="off"
                   />
-                  <p className="mt-1 text-xs text-gray-500">
-                    Up to {formatMoney(MAX_SPEND_LIMIT, currency)}.
-                  </p>
-                </div>
+                </Field>
 
-                <div className="w-28">
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-50">
-                    Currency
-                  </span>
-                  {/* A card settles in its merchant's currency, so this is
-                      shown rather than chosen. The server rejects a mismatch
-                      whatever the client sends. */}
+                <Field
+                  id="card-currency"
+                  label="Currency"
+                  hint="Set by the merchant."
+                  className="w-28"
+                >
                   <p
+                    id="card-currency"
                     className="mt-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-900 dark:border-gray-800 dark:text-gray-50"
-                    aria-label={`Currency ${currency}, set by the merchant`}
                   >
                     {currency}
                   </p>
-                </div>
+                </Field>
               </div>
 
-              <div>
-                <label
-                  htmlFor="card-category"
-                  className="text-sm font-medium text-gray-900 dark:text-gray-50"
-                >
-                  Category lock
-                </label>
+              <Field
+                id="card-category"
+                label="Category lock"
+                hint="Fixed at issue. Changing it later is NWP-202."
+              >
                 <Select
                   value={category}
-                  onValueChange={(value) => setCategory(value as CardCategory)}
+                  onValueChange={(v) => setCategory(v as CardCategory)}
                 >
-                  <SelectTrigger id="card-category" className="mt-1.5 w-full py-1.5">
+                  <SelectTrigger
+                    id="card-category"
+                    className="mt-1.5 w-full py-1.5"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -337,15 +343,12 @@ export function IssueCardDialog({
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="mt-1 text-xs text-gray-500">
-                  Fixed at issue. Changing it later is NWP-202.
-                </p>
-              </div>
+              </Field>
             </DrawerBody>
 
             <DrawerFooter>
               <DrawerClose asChild>
-                <Button variant="secondary" className="py-1.5" type="button">
+                <Button variant="secondary" type="button" className="py-1.5">
                   Cancel
                 </Button>
               </DrawerClose>
@@ -357,20 +360,5 @@ export function IssueCardDialog({
         )}
       </DrawerContent>
     </Drawer>
-  )
-}
-
-function Row({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <dt className="text-gray-500">{label}</dt>
-      <dd className="mt-0.5 text-gray-900 dark:text-gray-50">{children}</dd>
-    </div>
   )
 }
