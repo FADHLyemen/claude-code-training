@@ -11,6 +11,18 @@ export type DisputeStatus = "needs_response" | "under_review" | "won" | "lost"
 
 export type PayoutStatus = "paid" | "in_transit" | "pending"
 
+/** `active ⇄ frozen`, either to `cancelled`, and `cancelled` is terminal. */
+export type CardStatus = "active" | "frozen" | "cancelled"
+
+/** What a card is allowed to be spent on. Chosen at issue, fixed after. */
+export type CardCategory =
+  | "any"
+  | "advertising"
+  | "software"
+  | "travel"
+  | "supplies"
+  | "contractors"
+
 export interface Merchant {
   id: string
   name: string
@@ -69,6 +81,32 @@ export interface Payout {
   currency: Currency
   status: PayoutStatus
   paymentIds: string[]
+}
+
+/**
+ * A virtual card.
+ *
+ * There is deliberately no field for the full number. It exists once, in the
+ * issue response, and is never written here — so no list or detail payload
+ * can leak one, because there is nothing to read.
+ */
+export interface Card {
+  id: string
+  nickname: string
+  merchantId: string
+  /** Integer minor units. A $250.00 limit is 25000. */
+  spendLimit: number
+  /** Integer minor units, same currency as the limit. */
+  spent: number
+  currency: Currency
+  status: CardStatus
+  category: CardCategory
+  /** The only part of the number we keep. */
+  last4: string
+  /** Opaque handle for the issued number. Not the number, not derived from it. */
+  reference: string
+  /** ISO 8601, always UTC. */
+  createdAt: string
 }
 
 export interface PaymentFilters {
