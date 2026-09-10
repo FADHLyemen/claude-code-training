@@ -97,7 +97,11 @@ export default function CardsPage() {
                   </TableCell>
                   <TableCell>{formatDate(card.createdAt)}</TableCell>
                   <TableCell className="text-right">
-                    <CardActions cardId={card.id} status={card.status} />
+                    <CardActions
+                      cardId={card.id}
+                      nickname={card.nickname}
+                      status={card.status}
+                    />
                   </TableCell>
                 </TableRow>
               ))}

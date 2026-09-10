@@ -131,7 +131,7 @@ export interface IssueCardInput {
  */
 export function validateIssueInput(
   body: unknown,
-  merchantExists: (id: string) => boolean,
+  merchantCurrency: (id: string) => Currency | undefined,
 ): { ok: true; value: IssueCardInput } | { ok: false; errors: string[] } {
   const errors: string[] = []
   const input = (body ?? {}) as Record<string, unknown>
@@ -142,8 +142,9 @@ export function validateIssueInput(
 
   const merchantId =
     typeof input.merchantId === "string" ? input.merchantId.trim() : ""
+  const expectedCurrency = merchantId ? merchantCurrency(merchantId) : undefined
   if (!merchantId) errors.push("Merchant is required.")
-  else if (!merchantExists(merchantId)) errors.push("Unknown merchant.")
+  else if (!expectedCurrency) errors.push("Unknown merchant.")
 
   // Minor units only: a float or a string with a symbol is refused rather
   // than coerced, so nothing rounds on its way in.
@@ -160,6 +161,12 @@ export function validateIssueInput(
 
   if (!isCardCurrency(input.currency)) {
     errors.push("Currency must be one of USD, EUR, GBP.")
+  } else if (expectedCurrency && input.currency !== expectedCurrency) {
+    // A card settles in its merchant's currency. The form defaults to it, but
+    // the client is not trusted to have kept it — this is the enforcement.
+    errors.push(
+      `Currency must match the merchant's own (${expectedCurrency}).`,
+    )
   }
 
   const category = input.category ?? "any"

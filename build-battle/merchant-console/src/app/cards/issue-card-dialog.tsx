@@ -36,8 +36,6 @@ const CATEGORY_LABELS: Record<CardCategory, string> = {
   contractors: "Contractors",
 }
 
-const CURRENCIES: Currency[] = ["USD", "EUR", "GBP"]
-
 type Issued = { card: Card; fullNumber: string }
 
 export function IssueCardDialog({
@@ -54,6 +52,9 @@ export function IssueCardDialog({
   const [currency, setCurrency] = useState<Currency>("USD")
   const [category, setCategory] = useState<CardCategory>("any")
 
+  // One key per form session. A retried submit reuses it, so a double-click
+  // or a flaky connection cannot issue two cards.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const [errors, setErrors] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [issued, setIssued] = useState<Issued | null>(null)
@@ -68,6 +69,7 @@ export function IssueCardDialog({
     setErrors([])
     setIssued(null)
     setCopied(false)
+    setIdempotencyKey(crypto.randomUUID())
   }
 
   const onOpenChange = (next: boolean) => {
@@ -95,7 +97,10 @@ export function IssueCardDialog({
     try {
       const response = await fetch("/api/cards", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": idempotencyKey,
+        },
         body: JSON.stringify({
           nickname,
           merchantId,
@@ -295,30 +300,18 @@ export function IssueCardDialog({
                 </div>
 
                 <div className="w-28">
-                  <label
-                    htmlFor="card-currency"
-                    className="text-sm font-medium text-gray-900 dark:text-gray-50"
-                  >
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-50">
                     Currency
-                  </label>
-                  <Select
-                    value={currency}
-                    onValueChange={(value) => setCurrency(value as Currency)}
+                  </span>
+                  {/* A card settles in its merchant's currency, so this is
+                      shown rather than chosen. The server rejects a mismatch
+                      whatever the client sends. */}
+                  <p
+                    className="mt-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-900 dark:border-gray-800 dark:text-gray-50"
+                    aria-label={`Currency ${currency}, set by the merchant`}
                   >
-                    <SelectTrigger
-                      id="card-currency"
-                      className="mt-1.5 w-full py-1.5"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CURRENCIES.map((code) => (
-                        <SelectItem key={code} value={code}>
-                          {code}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    {currency}
+                  </p>
                 </div>
               </div>
 

@@ -9,7 +9,7 @@ import {
   maskCardNumber,
   validateIssueInput,
 } from "./cards"
-import { CardStatus } from "@/data/types"
+import { CardStatus, Currency } from "@/data/types"
 
 /**
  * These four rules are the ones that make a card record shippable: the test
@@ -17,7 +17,9 @@ import { CardStatus } from "@/data/types"
  * cancelled card, and validation that does not trust the client.
  */
 
-const merchantExists = (id: string) => id === "mch_01"
+/** mch_01 settles in USD, mch_04 in GBP; anything else is unknown. */
+const merchantCurrency = (id: string): Currency | undefined =>
+  id === "mch_01" ? "USD" : id === "mch_04" ? "GBP" : undefined
 
 describe("luhnCheckDigit", () => {
   it("computes the digit that completes a known valid number", () => {
@@ -132,14 +134,14 @@ describe("validateIssueInput", () => {
   }
 
   it("accepts a well-formed request", () => {
-    const result = validateIssueInput(valid, merchantExists)
+    const result = validateIssueInput(valid, merchantCurrency)
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value.spendLimit).toBe(25000)
   })
 
   it("defaults the category when none is given", () => {
     const { category: _category, ...withoutCategory } = valid
-    const result = validateIssueInput(withoutCategory, merchantExists)
+    const result = validateIssueInput(withoutCategory, merchantCurrency)
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.value.category).toBe("any")
   })
@@ -147,7 +149,7 @@ describe("validateIssueInput", () => {
   it("rejects a missing merchant", () => {
     const result = validateIssueInput(
       { ...valid, merchantId: "" },
-      merchantExists,
+      merchantCurrency,
     )
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errors).toContain("Merchant is required.")
@@ -156,7 +158,7 @@ describe("validateIssueInput", () => {
   it("rejects a merchant that does not exist", () => {
     const result = validateIssueInput(
       { ...valid, merchantId: "mch_nope" },
-      merchantExists,
+      merchantCurrency,
     )
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errors).toContain("Unknown merchant.")
@@ -164,7 +166,7 @@ describe("validateIssueInput", () => {
 
   it("rejects a zero or negative limit", () => {
     for (const spendLimit of [0, -1, -25000]) {
-      expect(validateIssueInput({ ...valid, spendLimit }, merchantExists).ok).toBe(
+      expect(validateIssueInput({ ...valid, spendLimit }, merchantCurrency).ok).toBe(
         false,
       )
     }
@@ -174,13 +176,13 @@ describe("validateIssueInput", () => {
     expect(
       validateIssueInput(
         { ...valid, spendLimit: MAX_SPEND_LIMIT + 1 },
-        merchantExists,
+        merchantCurrency,
       ).ok,
     ).toBe(false)
     expect(
       validateIssueInput(
         { ...valid, spendLimit: MAX_SPEND_LIMIT },
-        merchantExists,
+        merchantCurrency,
       ).ok,
     ).toBe(true)
   })
@@ -188,44 +190,72 @@ describe("validateIssueInput", () => {
   it("rejects a limit that is not an integer number of minor units", () => {
     for (const spendLimit of [250.5, "25000", "$250.00", null]) {
       expect(
-        validateIssueInput({ ...valid, spendLimit }, merchantExists).ok,
+        validateIssueInput({ ...valid, spendLimit }, merchantCurrency).ok,
       ).toBe(false)
     }
   })
 
   it("rejects a currency outside USD, EUR, GBP", () => {
     for (const currency of ["JPY", "usd", "", 1, null]) {
-      expect(validateIssueInput({ ...valid, currency }, merchantExists).ok).toBe(
+      expect(validateIssueInput({ ...valid, currency }, merchantCurrency).ok).toBe(
         false,
       )
     }
   })
 
-  it("accepts each of the three supported currencies", () => {
-    for (const currency of ["USD", "EUR", "GBP"]) {
-      expect(validateIssueInput({ ...valid, currency }, merchantExists).ok).toBe(
-        true,
+  it("accepts a supported currency that matches the merchant", () => {
+    expect(
+      validateIssueInput(
+        { ...valid, merchantId: "mch_04", currency: "GBP" },
+        merchantCurrency,
+      ).ok,
+    ).toBe(true)
+  })
+
+  it("rejects a supported currency that is not the merchant's own", () => {
+    // The form defaults to the merchant's currency but stays editable, so
+    // this is the only thing standing between ops and a mismatched card.
+    const result = validateIssueInput(
+      { ...valid, merchantId: "mch_04", currency: "USD" },
+      merchantCurrency,
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors).toContain(
+        "Currency must match the merchant's own (GBP).",
       )
+    }
+  })
+
+  it("does not claim a currency mismatch when the merchant is unknown", () => {
+    const result = validateIssueInput(
+      { ...valid, merchantId: "mch_nope", currency: "EUR" },
+      merchantCurrency,
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.errors).toContain("Unknown merchant.")
+      expect(result.errors.some((e) => e.includes("must match"))).toBe(false)
     }
   })
 
   it("rejects a missing nickname", () => {
     expect(
-      validateIssueInput({ ...valid, nickname: "   " }, merchantExists).ok,
+      validateIssueInput({ ...valid, nickname: "   " }, merchantCurrency).ok,
     ).toBe(false)
   })
 
   it("reports every problem at once rather than the first", () => {
     const result = validateIssueInput(
       { nickname: "", merchantId: "", spendLimit: -1, currency: "JPY" },
-      merchantExists,
+      merchantCurrency,
     )
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errors.length).toBeGreaterThanOrEqual(4)
   })
 
   it("rejects a body that is not an object at all", () => {
-    expect(validateIssueInput(null, merchantExists).ok).toBe(false)
-    expect(validateIssueInput("nope", merchantExists).ok).toBe(false)
+    expect(validateIssueInput(null, merchantCurrency).ok).toBe(false)
+    expect(validateIssueInput("nope", merchantCurrency).ok).toBe(false)
   })
 })

@@ -83,6 +83,27 @@ export interface Payout {
   paymentIds: string[]
 }
 
+/** One recorded authorization against a card. Spend is the sum of these. */
+export interface CardTransaction {
+  id: string
+  cardId: string
+  /** Integer minor units, same currency as the card. */
+  amount: number
+  description: string
+  /** ISO 8601, always UTC. */
+  createdAt: string
+}
+
+/** An entry in a card's audit trail. */
+export interface CardEvent {
+  /** What happened: issued, or a status transition. */
+  type: "issued" | "status_changed"
+  from?: CardStatus
+  to?: CardStatus
+  /** ISO 8601, always UTC. */
+  at: string
+}
+
 /**
  * A virtual card.
  *
@@ -96,8 +117,6 @@ export interface Card {
   merchantId: string
   /** Integer minor units. A $250.00 limit is 25000. */
   spendLimit: number
-  /** Integer minor units, same currency as the limit. */
-  spent: number
   currency: Currency
   status: CardStatus
   category: CardCategory
@@ -107,6 +126,8 @@ export interface Card {
   reference: string
   /** ISO 8601, always UTC. */
   createdAt: string
+  /** Every status change, oldest first. Issued is always the first entry. */
+  history: CardEvent[]
 }
 
 export interface PaymentFilters {

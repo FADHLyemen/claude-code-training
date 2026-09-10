@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const result = validateIssueInput(body, (id) => Boolean(merchantById(id)))
+  const result = validateIssueInput(body, (id) => merchantById(id)?.currency)
   if (!result.ok) {
     return NextResponse.json(
       { message: result.errors[0], errors: result.errors },
@@ -40,14 +40,23 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { card, fullNumber } = issueCard(result.value)
+  // A retried submit with the same key returns the first card rather than
+  // issuing a second one.
+  const idempotencyKey =
+    request.headers.get("idempotency-key") ??
+    (typeof (body as { idempotencyKey?: unknown })?.idempotencyKey === "string"
+      ? ((body as { idempotencyKey: string }).idempotencyKey)
+      : undefined)
+
+  const { card, fullNumber, replayed } = issueCard(result.value, idempotencyKey)
 
   return NextResponse.json(
     {
       card,
       // Shown once on the success screen. No other route returns this.
       fullNumber,
+      replayed,
     },
-    { status: 201 },
+    { status: replayed ? 200 : 201 },
   )
 }

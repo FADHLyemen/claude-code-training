@@ -1,6 +1,6 @@
 import { Divider } from "@/components/Divider"
 import { CardStatusBadge } from "@/components/ui/cards/CardStatusBadge"
-import { cardById } from "@/data/cards"
+import { cardById, spentForCard, transactionsForCard } from "@/data/cards"
 import { merchantById } from "@/data/merchants"
 import { CardCategory } from "@/data/types"
 import { maskCardNumber } from "@/lib/cards"
@@ -20,6 +20,12 @@ const CATEGORY_LABELS: Record<CardCategory, string> = {
   contractors: "Contractors",
 }
 
+const STATUS_VERBS: Record<string, string> = {
+  active: "Unfrozen",
+  frozen: "Frozen",
+  cancelled: "Cancelled",
+}
+
 /** Amber past 80% of the limit, so ops sees a card running out before it does. */
 const AMBER_AT = 0.8
 
@@ -33,13 +39,17 @@ export default async function CardDetail({
   if (!card) notFound()
 
   const merchant = merchantById(card.merchantId)!
+  const transactions = transactionsForCard(card.id)
+  // Spend is the sum of the authorizations below, never a stored number that
+  // could disagree with them.
+  const spent = spentForCard(card.id)
 
   // Both sides are minor units; the ratio is the only float here and it is
   // display-only.
-  const ratio = card.spendLimit > 0 ? card.spent / card.spendLimit : 0
+  const ratio = card.spendLimit > 0 ? spent / card.spendLimit : 0
   const pct = Math.min(100, Math.round(ratio * 100))
   const overAmber = ratio >= AMBER_AT
-  const remaining = Math.max(0, card.spendLimit - card.spent)
+  const remaining = Math.max(0, card.spendLimit - spent)
 
   return (
     <div className="p-4 sm:p-6">
@@ -57,7 +67,11 @@ export default async function CardDetail({
           </h1>
           <CardStatusBadge status={card.status} />
         </div>
-        <CardActions cardId={card.id} status={card.status} />
+        <CardActions
+          cardId={card.id}
+          nickname={card.nickname}
+          status={card.status}
+        />
       </div>
       <p className="mt-1 font-mono text-sm text-gray-500">
         {maskCardNumber(card.last4)} · {card.id}
@@ -81,7 +95,7 @@ export default async function CardDetail({
             Spend against limit
           </h2>
           <p className="text-sm tabular-nums text-gray-500">
-            {formatMoney(card.spent, card.currency)} of{" "}
+            {formatMoney(spent, card.currency)} of{" "}
             {formatMoney(card.spendLimit, card.currency)}
           </p>
         </div>
@@ -147,6 +161,72 @@ export default async function CardDetail({
           {formatInZone(card.createdAt, merchant.timezone)}
         </Field>
       </dl>
+
+      <Divider />
+
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        <section aria-labelledby="activity-heading">
+          <h2
+            id="activity-heading"
+            className="text-sm font-semibold text-gray-900 dark:text-gray-50"
+          >
+            Authorizations
+          </h2>
+          {transactions.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">
+              Nothing charged to this card yet. Spend appears here as
+              authorizations land, and the bar above is their sum.
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y divide-gray-200 dark:divide-gray-800">
+              {transactions.map((tx) => (
+                <li key={tx.id} className="flex justify-between gap-4 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-gray-900 dark:text-gray-50">
+                      {tx.description}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {formatInZone(tx.createdAt, merchant.timezone)}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-sm font-medium tabular-nums text-gray-900 dark:text-gray-50">
+                    {formatMoney(tx.amount, card.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="history-heading">
+          <h2
+            id="history-heading"
+            className="text-sm font-semibold text-gray-900 dark:text-gray-50"
+          >
+            History
+          </h2>
+          <ol className="mt-3 space-y-3">
+            {card.history.map((event, index) => (
+              <li key={index} className="flex gap-3">
+                <span
+                  className="mt-1.5 size-2 shrink-0 rounded-full bg-blue-500"
+                  aria-hidden="true"
+                />
+                <div>
+                  <p className="text-sm text-gray-900 dark:text-gray-50">
+                    {event.type === "issued"
+                      ? "Card issued"
+                      : `${STATUS_VERBS[event.to!]} — ${event.from} to ${event.to}`}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {formatInZone(event.at, merchant.timezone)}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </div>
 
       <Divider />
 

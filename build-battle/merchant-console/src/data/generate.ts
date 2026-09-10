@@ -3,7 +3,9 @@ import { merchants } from "./merchants"
 import {
   Card,
   CardCategory,
+  CardEvent,
   CardStatus,
+  CardTransaction,
   Currency,
   Dispute,
   Payment,
@@ -152,8 +154,8 @@ export function generate() {
   }
 
   const payouts = generatePayouts(payments)
-  const cards = generateCards()
-  return { payments, refunds, disputes, payouts, cards }
+  const { cards, cardTransactions } = generateCards()
+  return { payments, refunds, disputes, payouts, cards, cardTransactions }
 }
 
 /**
@@ -161,50 +163,91 @@ export function generate() {
  * something to show on a fresh boot. Same deterministic PRNG as everything
  * else, so every machine sees the same records.
  *
- * Only the last four is kept — the generated number is discarded here exactly
+ * Spend is not assigned. Each card gets real authorizations and its spend is
+ * the sum of them, exactly as it is for a card issued through the console —
+ * there is no seeded number that could disagree with the transactions shown.
+ *
+ * Only the last four is kept; the generated number is discarded here exactly
  * as the issue route discards it.
  */
-function generateCards(): Card[] {
+function generateCards(): { cards: Card[]; cardTransactions: CardTransaction[] } {
   const seeds: {
     nickname: string
     merchantIndex: number
     spendLimit: number
     category: CardCategory
     status: CardStatus
-    /** Fraction of the limit already spent. */
-    used: number
+    /** How many authorizations to record against it. */
+    charges: number
     daysAgo: number
   }[] = [
-    { nickname: "Google Ads", merchantIndex: 0, spendLimit: 500_000, category: "advertising", status: "active", used: 0.42, daysAgo: 38 },
-    { nickname: "AWS monthly", merchantIndex: 1, spendLimit: 250_000, category: "software", status: "active", used: 0.87, daysAgo: 26 },
-    { nickname: "Contractor — design", merchantIndex: 3, spendLimit: 180_000, category: "contractors", status: "frozen", used: 0.55, daysAgo: 19 },
-    { nickname: "Trade show travel", merchantIndex: 4, spendLimit: 320_000, category: "travel", status: "active", used: 0.12, daysAgo: 11 },
-    { nickname: "Old agency retainer", merchantIndex: 6, spendLimit: 120_000, category: "advertising", status: "cancelled", used: 1, daysAgo: 63 },
+    { nickname: "Google Ads", merchantIndex: 0, spendLimit: 500_000, category: "advertising", status: "active", charges: 6, daysAgo: 38 },
+    { nickname: "AWS monthly", merchantIndex: 1, spendLimit: 250_000, category: "software", status: "active", charges: 9, daysAgo: 26 },
+    { nickname: "Contractor — design", merchantIndex: 3, spendLimit: 180_000, category: "contractors", status: "frozen", charges: 4, daysAgo: 19 },
+    { nickname: "Trade show travel", merchantIndex: 4, spendLimit: 320_000, category: "travel", status: "active", charges: 2, daysAgo: 11 },
+    { nickname: "Old agency retainer", merchantIndex: 6, spendLimit: 120_000, category: "advertising", status: "cancelled", charges: 5, daysAgo: 63 },
   ]
 
-  return seeds.map((seed, index) => {
+  const vendors = ["Monthly invoice", "Usage charge", "Subscription", "Top-up", "Service fee"]
+  const cards: Card[] = []
+  const cardTransactions: CardTransaction[] = []
+  let txSeq = 0
+
+  seeds.forEach((seed, index) => {
     const merchant = merchants[seed.merchantIndex]
     const createdAt = new Date(GENERATED_AT)
     createdAt.setUTCDate(createdAt.getUTCDate() - seed.daysAgo)
     createdAt.setUTCHours(between(9, 17), between(0, 59), 0, 0)
+    const issuedAt = createdAt.toISOString()
 
+    const id = `card_${pad(index + 1, 4)}`
     const number = generateCardNumber(rand)
 
-    return {
-      id: `card_${pad(index + 1, 4)}`,
+    // Authorizations land between issue and today, each a whole minor-unit
+    // amount sized against the limit.
+    const history: CardEvent[] = [{ type: "issued", to: "active", at: issuedAt }]
+    for (let c = 0; c < seed.charges; c++) {
+      const at = new Date(createdAt)
+      at.setUTCDate(at.getUTCDate() + between(1, Math.max(2, seed.daysAgo - 1)))
+      if (at > GENERATED_AT) at.setTime(GENERATED_AT.getTime())
+      cardTransactions.push({
+        id: `ctx_${pad(++txSeq, 4)}`,
+        cardId: id,
+        amount: between(
+          Math.round(seed.spendLimit * 0.03),
+          Math.round(seed.spendLimit / Math.max(2, seed.charges - 1)),
+        ),
+        description: vendors[between(0, vendors.length - 1)],
+        createdAt: at.toISOString(),
+      })
+    }
+    if (seed.status !== "active") {
+      const at = new Date(GENERATED_AT)
+      at.setUTCDate(at.getUTCDate() - between(1, 5))
+      history.push({
+        type: "status_changed",
+        from: "active",
+        to: seed.status,
+        at: at.toISOString(),
+      })
+    }
+
+    cards.push({
+      id,
       nickname: seed.nickname,
       merchantId: merchant.id,
       spendLimit: seed.spendLimit,
-      // Minor units in, minor units out — rounded to a whole unit, never a float.
-      spent: Math.round(seed.spendLimit * seed.used),
       currency: merchant.currency,
       status: seed.status,
       category: seed.category,
       last4: number.slice(-4),
-      reference: `cref_${pad(index + 1, 6)}`,
-      createdAt: createdAt.toISOString(),
-    }
+      reference: `cref_${pad(index + 1, 4)}`,
+      createdAt: issuedAt,
+      history,
+    })
   })
+
+  return { cards, cardTransactions }
 }
 
 function generatePayouts(payments: Payment[]): Payout[] {
